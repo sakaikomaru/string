@@ -4,7 +4,10 @@ module Data.String.SuffixArray where
 
 import           Control.Monad
 import           Control.Monad.Cont
+import           Control.Monad.Fix
 import           Control.Monad.ST
+import           Data.Bool
+import           Data.IORef
 import qualified Data.Vector.Fusion.Stream.Monadic as VFSM
 import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
@@ -46,6 +49,36 @@ inducedSort vec valRange sa sl lmsIdx = do
       rveci <- VUM.unsafeRead r (vec VU.! (i - 1))
       VUM.unsafeWrite sa rveci (i - 1)
 
+sais :: VU.Vector Int -> Int -> IO (VUM.IOVector Int)
+sais vec valRange = do
+  undefined
+
+suffixArray :: VU.Vector Char -> Int -> IO (VUM.IOVector Int)
+suffixArray s lim = undefined
+
+longestCommonPrefix :: VU.Vector Char -> VU.Vector Int -> IO (VUM.IOVector Int)
+longestCommonPrefix s sa = do
+  let !n = VU.length s
+  kPtr <- newIORef (0 :: Int)
+  lcp <- VUM.unsafeNew n  :: IO (VUM.IOVector Int)
+  rank <- VUM.unsafeNew n :: IO (VUM.IOVector Int)
+  rep n $ \i -> VUM.unsafeWrite rank (sa VU.! i) i
+  rep n $ \i -> do
+    modifyIORef kPtr (\l -> bool 0 (l - 1) (l /= 0))
+    ranki <- VUM.unsafeRead rank i
+    if ranki == n - 1
+      then do
+        writeIORef kPtr 0
+      else do
+        let j = sa VU.! (ranki + 1)
+        fix $ \loop -> do
+          k <- readIORef kPtr
+          when (i + k < n && j + k < n && s VU.! (i + k) == s VU.! (j + k)) $ do
+            modifyIORef' kPtr succ
+            loop
+        VUM.unsafeWrite lcp ranki =<< readIORef kPtr
+  VUM.unsafeWrite lcp (n - 1) 0
+  return lcp
 -------------------------------------------------------------------------------
 -- for
 -------------------------------------------------------------------------------
