@@ -1,4 +1,5 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns     #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Data.String.SuffixArray where
 
@@ -7,9 +8,10 @@ import           Control.Monad.Cont
 import           Control.Monad.Fix
 import           Control.Monad.ST
 import           Data.Bool
-import           Data.Char
 import           Data.IORef
 import           Data.STRef
+import           Data.Word
+import           Unsafe.Coerce
 import qualified Data.Vector.Fusion.Stream.Monadic as VFSM
 import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
@@ -54,9 +56,9 @@ inducedSort vec valRange sa sl lmsIdx = do
 sais :: VUM.STVector s Int -> Int -> ST s (VUM.STVector s Int)
 sais mvec lim = do
   let !n = VUM.length mvec
-  sa <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
+  sa     <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
   lmsIdx <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  sl0 <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
+  sl0    <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
   VUM.unsafeWrite sl0 (n - 1) False
   rangeR (n - 2) 0 $ \i -> do
     mveci  <- VUM.unsafeRead mvec i
@@ -101,30 +103,38 @@ sais mvec lim = do
           ) (i + 1) (j + 1)
         _flag <- readSTRef flag
         _cur  <- readSTRef cur
-        VUM.unsafeWrite sa j (bool _cur (_cur + 1) _flag)
+        if _flag
+          then do
+            VUM.unsafeWrite sa j (_cur + 1)
+            modifySTRef cur succ
+          else VUM.unsafeWrite sa j _cur
   rep lmsidxSize $ \i -> do
     salmsidxi <- VUM.unsafeRead sa (lmsIDX VU.! i)
     VUM.unsafeWrite lmsVec i salmsidxi
   cur' <- readSTRef cur
-  when (cur' + 1 < lmsidxSize) $ do
-    lm <- sais lmsVec (cur' + 1)
-    rep lmsidxSize $ \i -> do
-      item <- VUM.unsafeRead lm i
-      VUM.unsafeWrite newLMSidx i (lmsIDX VU.! item)
-  lms <- VU.unsafeFreeze newLMSidx
-  inducedSort vec lim sa sl lms
-  return sa
+  if cur' + 1 < lmsidxSize
+    then do
+      lm <- sais lmsVec (cur' + 1)
+      rep lmsidxSize $ \i -> do
+        item <- VUM.unsafeRead lm i
+        VUM.unsafeWrite newLMSidx i (lmsIDX VU.! item)
+      lms <- VU.unsafeFreeze newLMSidx
+      inducedSort vec lim sa sl lms
+      return sa
+    else do
+      lms <- VU.unsafeFreeze newLMSidx
+      inducedSort vec lim sa sl lms
+      return sa
 
-suffixArray :: VU.Vector Char -> VU.Vector Int
-suffixArray s = VU.tail $ VU.create $ do
+suffixArray :: VU.Vector Word8 -> VU.Vector Int
+suffixArray s = VU.create $ do
   let
     n = VU.length s + 1
-    k = VU.map ((+ 87) . digitToInt) s
   new <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
   rep n $ \i -> do
     if i == (n - 1)
       then VUM.unsafeWrite new (n - 1) 36
-      else VUM.unsafeWrite new i (k VU.! i)
+      else VUM.unsafeWrite new i (unsafeCoerce @Word8 @Int $ s VU.! i)
   sais new 128
 
 longestCommonPrefix :: VU.Vector Char -> VU.Vector Int -> IO (VUM.IOVector Int)
@@ -150,6 +160,7 @@ longestCommonPrefix s sa = do
         VUM.unsafeWrite lcp ranki =<< readIORef kPtr
   VUM.unsafeWrite lcp (n - 1) 0
   return lcp
+
 -------------------------------------------------------------------------------
 -- for
 -------------------------------------------------------------------------------

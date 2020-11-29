@@ -31,7 +31,10 @@ import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
 
 main :: IO ()
-main = BSC8.getLine >>= printVecInSpcSepLn . VU.tail . suffixArray . VU.unfoldrN 500001 (runCParser byte)
+main = do
+  xs <- BSC8.getLine
+  let n = BSC8.length xs
+  printVecInSpcSepLn . VU.tail . suffixArray . VU.unfoldrN n (runCParser byte) $ xs
 
 inducedSort :: VU.Vector Int -> Int -> VUM.STVector s Int -> VU.Vector Bool -> VU.Vector Int -> ST s ()
 inducedSort vec valRange sa sl lmsIdx = do
@@ -73,9 +76,9 @@ inducedSort vec valRange sa sl lmsIdx = do
 sais :: VUM.STVector s Int -> Int -> ST s (VUM.STVector s Int)
 sais mvec lim = do
   let !n = VUM.length mvec
-  sa <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
+  sa     <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
   lmsIdx <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  sl0 <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
+  sl0    <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
   VUM.unsafeWrite sl0 (n - 1) False
   rangeR (n - 2) 0 $ \i -> do
     mveci  <- VUM.unsafeRead mvec i
@@ -120,7 +123,11 @@ sais mvec lim = do
           ) (i + 1) (j + 1)
         _flag <- readSTRef flag
         _cur  <- readSTRef cur
-        VUM.unsafeWrite sa j (bool _cur (_cur + 1) _flag)
+        if _flag
+          then do
+            VUM.unsafeWrite sa j (_cur + 1)
+            modifySTRef cur succ
+          else VUM.unsafeWrite sa j _cur
   rep lmsidxSize $ \i -> do
     salmsidxi <- VUM.unsafeRead sa (lmsIDX VU.! i)
     VUM.unsafeWrite lmsVec i salmsidxi
