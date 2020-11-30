@@ -16,24 +16,26 @@ import qualified Data.Vector.Fusion.Stream.Monadic as VFSM
 import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
 
-inducedSort :: VU.Vector Int -> Int -> VUM.STVector s Int -> VU.Vector Bool -> VU.Vector Int -> ST s ()
-inducedSort vec valRange sa sl lmsIdx = do
-  l <- VUM.unsafeNew valRange :: ST s (VUM.STVector s Int)
-  r <- VUM.unsafeNew valRange :: ST s (VUM.STVector s Int)
+type SuffixArray = VUM.IOVector Int
+
+inducedSort :: SuffixArray -> VU.Vector Int -> VU.Vector Bool -> VU.Vector Int -> Int -> IO ()
+inducedSort sa vec sl lmsIdx valRange = do
+  l <- VUM.unsafeNew valRange :: IO (VUM.IOVector Int)
+  r <- VUM.unsafeNew valRange :: IO (VUM.IOVector Int)
   VU.forM_ vec $ \c -> do
     when (c + 1 < valRange) $ VUM.unsafeModify l succ (c + 1)
     VUM.unsafeModify r succ c
-  rep1 (VUM.length l) $ \i -> do
+  rep1 valRange $ \i -> do
     item <- VUM.unsafeRead l (i - 1)
     VUM.unsafeModify l (+ item) i
-  rep1 (VUM.length r) $ \i -> do
+  rep1 valRange $ \i -> do
     item <- VUM.unsafeRead r (i - 1)
     VUM.unsafeModify r (+ item) i
   rep (VUM.length sa) $ \i -> VUM.unsafeWrite sa i (-1)
   rev (VU.length lmsIdx) $ \i -> do
-    let idxteriwh = vec VU.! (lmsIdx VU.! i)
-    VUM.unsafeModify r pred idxteriwh
-    item <- VUM.unsafeRead r idxteriwh
+    let _idx = vec VU.! (lmsIdx VU.! i)
+    VUM.unsafeModify r pred _idx
+    item <- VUM.unsafeRead r _idx
     VUM.unsafeWrite sa item (lmsIdx VU.! i)
   rep (VUM.length sa) $ \idx -> do
     i <- VUM.unsafeRead sa idx
@@ -53,89 +55,101 @@ inducedSort vec valRange sa sl lmsIdx = do
       rveci <- VUM.unsafeRead r (vec VU.! (i - 1))
       VUM.unsafeWrite sa rveci (i - 1)
 
-sais :: VUM.STVector s Int -> Int -> ST s (VUM.STVector s Int)
-sais mvec lim = do
-  let !n = VUM.length mvec
-  sa     <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  lmsIdx <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  sl0    <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
-  VUM.unsafeWrite sl0 (n - 1) False
+createLMSIdx :: VU.Vector Int -> Int -> IO (VU.Vector Int, VU.Vector Bool)
+createLMSIdx vec n = do
+  lmsIdx <- VUM.unsafeNew n :: IO (VUM.IOVector Int)
+  sl     <- VUM.unsafeNew n :: IO (VUM.IOVector Bool)
+  VUM.unsafeWrite sl (n - 1) False
   rangeR (n - 2) 0 $ \i -> do
-    mveci  <- VUM.unsafeRead mvec i
-    mveci1 <- VUM.unsafeRead mvec (i + 1)
-    sli1   <- VUM.unsafeRead sl0 (i + 1)
-    let sli = mveci > mveci1 || (mveci == mveci1 && sli1)
-    VUM.unsafeWrite sl0 i sli
-    when (sli && not sli1) $ VUM.unsafeWrite lmsIdx i (i + 1)
-  lmsIDX <- VU.filter (/= 0) <$> VU.unsafeFreeze lmsIdx
-  sl     <- VU.unsafeFreeze sl0
-  vec    <- VU.unsafeFreeze mvec
-  inducedSort vec lim sa sl lmsIDX
-  let lmsidxSize = VU.length lmsIDX
-  newLMSidx <- VUM.unsafeNew lmsidxSize :: ST s (VUM.STVector s Int)
-  lmsVec    <- VUM.unsafeNew lmsidxSize :: ST s (VUM.STVector s Int)
-  kRef <- newSTRef (0 :: Int)
+    let
+      veci  = vec VU.! i
+      veci1 = vec VU.! (i + 1)
+    sli1 <- VUM.unsafeRead sl (i + 1)
+    let
+      check = veci > veci1 || (veci == veci1 && sli1)
+    VUM.unsafeWrite sl i check
+    when (check && not sli1) $ VUM.unsafeWrite lmsIdx ((n - 2) - i) (i + 1)
+  target1 <- VU.reverse . VU.filter (/= 0) <$> VU.unsafeFreeze lmsIdx
+  target2 <- VU.unsafeFreeze sl
+  return (target1, target2)
+
+createLMSVec :: SuffixArray -> VU.Vector Int -> Int -> VU.Vector Int -> Int -> VU.Vector Bool -> IO (VUM.IOVector Int, VU.Vector Int, Int)
+createLMSVec sa vec n lmsIdx lmSize sl = do
+  newLMSIdx <- VUM.unsafeNew lmSize :: IO (VUM.IOVector Int)
+  lmsVec    <- VUM.unsafeNew lmSize :: IO (VUM.IOVector Int)
+  kRef <- newIORef (0 :: Int)
   rep n $ \i -> do
     sai <- VUM.unsafeRead sa i
-    when (not (sl VU.! sai) && sai >= 1 && sl VU.! (sai - 1)) $ do
-      k <- readSTRef kRef
-      VUM.unsafeWrite newLMSidx k sai
-      modifySTRef kRef succ
-  cur <- newSTRef (0 :: Int)
+    let
+      check1 = not $ sl VU.! sai
+      check2 = sai >= 1
+      check3 = sl VU.! (sai - 1)
+    when (check1 && check2 && check3) $ do
+      k <- readIORef kRef
+      VUM.unsafeWrite newLMSIdx k sai
+      modifyIORef kRef succ
+  curRef <- newIORef (0 :: Int)
   VUM.unsafeWrite sa (n - 1) 0
-  rep1 (VUM.length newLMSidx) $ \k -> do
-    i <- VUM.unsafeRead newLMSidx (k - 1)
-    j <- VUM.unsafeRead newLMSidx k
+  rep1 lmSize $ \k -> do
+    i <- VUM.unsafeRead newLMSIdx (k - 1)
+    j <- VUM.unsafeRead newLMSIdx k
     if vec VU.! i /= vec VU.! j
       then do
-        modifySTRef cur succ
-        VUM.unsafeWrite sa j =<< readSTRef cur
+        modifyIORef' curRef succ
+        VUM.unsafeWrite sa j =<< readIORef curRef
       else do
-        flag <- newSTRef False
-        withBreakST $ \break -> fix (\loop a b -> do
+        flagRef <- newIORef False
+        aRef    <- newIORef (i + 1)
+        bRef    <- newIORef (j + 1)
+        withBreakIO $ \break -> rep n $ \_ -> do
+          a <- liftIO $ readIORef aRef
+          b <- liftIO $ readIORef bRef
           when (vec VU.! a /= vec VU.! b) $ do
-            lift $ writeSTRef flag True
+            liftIO $ writeIORef flagRef True
             break ()
-          when ((not (sl VU.! a) && sl VU.! (a - 1)) || (not (sl VU.! b) && sl VU.! (b - 1))) $ do
-            lift $ writeSTRef flag (not ((not (sl VU.! a) && sl VU.! (a - 1)) && (not (sl VU.! b) && sl VU.! (b - 1))))
-            break ()
-          loop (a + 1) (b + 1)
-          ) (i + 1) (j + 1)
-        _flag <- readSTRef flag
-        _cur  <- readSTRef cur
-        if _flag
-          then do
-            VUM.unsafeWrite sa j (_cur + 1)
-            modifySTRef cur succ
-          else VUM.unsafeWrite sa j _cur
-  rep lmsidxSize $ \i -> do
-    salmsidxi <- VUM.unsafeRead sa (lmsIDX VU.! i)
-    VUM.unsafeWrite lmsVec i salmsidxi
-  cur' <- readSTRef cur
-  if cur' + 1 < lmsidxSize
-    then do
-      lm <- sais lmsVec (cur' + 1)
-      rep lmsidxSize $ \i -> do
-        item <- VUM.unsafeRead lm i
-        VUM.unsafeWrite newLMSidx i (lmsIDX VU.! item)
-      lms <- VU.unsafeFreeze newLMSidx
-      inducedSort vec lim sa sl lms
-      return sa
-    else do
-      lms <- VU.unsafeFreeze newLMSidx
-      inducedSort vec lim sa sl lms
-      return sa
+          let
+            check4 = not $ sl VU.! a  
+            check5 = sl VU.! (a - 1)
+            check6 = not $ sl VU.! b
+            check7 = sl VU.! (b - 1)
+            check8 = (check4 && check5) || (check6 && check7)
+          when check8 $ do
+            liftIO $ writeIORef flagRef (not check8)
+            break()
+        flag <- readIORef flagRef
+        cur  <- readIORef curRef
+        VUM.unsafeWrite sa j (bool cur (cur + 1) flag)
+        when flag $ modifyIORef curRef succ
+  rep lmSize $ \i -> do
+    item <- VUM.unsafeRead sa (lmsIdx VU.! i)
+    VUM.unsafeWrite lmsVec i item
+  target1 <- VU.unsafeFreeze lmsVec
+  target2 <- readIORef curRef
+  return (newLMSIdx, target1, target2)
 
-suffixArray :: VU.Vector Word8 -> VU.Vector Int
-suffixArray s = VU.create $ do
-  let
-    n = VU.length s + 1
-  new <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  rep n $ \i -> do
-    if i == (n - 1)
-      then VUM.unsafeWrite new (n - 1) 36
-      else VUM.unsafeWrite new i (unsafeCoerce @Word8 @Int $ s VU.! i)
-  sais new 128
+sais :: SuffixArray -> VU.Vector Int -> Int -> IO ()
+sais sa vec valRange = do
+  let n = VU.length vec
+  (lmsIdx, sl) <- createLMSIdx vec n
+  inducedSort sa vec sl lmsIdx valRange
+  let lmSize = VU.length lmsIdx
+  (newlmsIdx, lmsVec, cur) <- createLMSVec sa vec n lmsIdx lmSize sl
+  when (cur + 1 < lmSize) $ do
+    sa' <- VUM.unsafeNew (VU.length lmsVec + 1) :: IO SuffixArray
+    sais sa' lmsVec (cur + 1)
+    rep (VU.length lmsVec) $ \i -> do
+      item <- VUM.unsafeRead sa' i
+      VUM.unsafeWrite newlmsIdx i (lmsIdx VU.! item)
+  newLMSIDX <- VU.unsafeFreeze newlmsIdx
+  inducedSort sa vec sl newLMSIDX valRange
+
+suffixArray :: VU.Vector Word8 -> IO (VU.Vector Int)
+suffixArray vec = do
+  sa <- VUM.unsafeNew (1 + VU.length vec) :: IO (VUM.IOVector Int)
+  let vec' = (VU.++ VU.singleton 36) $ VU.map (unsafeCoerce @Word8 @Int) vec
+  sais sa vec' 128
+  VU.tail <$> VU.unsafeFreeze sa
+
 
 longestCommonPrefix :: VU.Vector Char -> VU.Vector Int -> IO (VUM.IOVector Int)
 longestCommonPrefix s sa = do
