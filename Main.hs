@@ -30,6 +30,8 @@ import qualified Data.Vector.Generic               as VG
 import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
 
+{- https://judge.yosupo.jp/submission/31467 -}
+
 main :: IO ()
 main = do
   xs <- BSC8.getLine
@@ -38,8 +40,8 @@ main = do
 
 inducedSort :: VU.Vector Int -> Int -> VUM.STVector s Int -> VU.Vector Bool -> VU.Vector Int -> ST s ()
 inducedSort vec valRange sa sl lmsIdx = do
-  l <- VUM.unsafeNew valRange :: ST s (VUM.STVector s Int)
-  r <- VUM.unsafeNew valRange :: ST s (VUM.STVector s Int)
+  l <- VUM.replicate valRange 0 :: ST s (VUM.STVector s Int)
+  r <- VUM.replicate valRange 0 :: ST s (VUM.STVector s Int)
   VU.forM_ vec $ \c -> do
     when (c + 1 < valRange) $ VUM.unsafeModify l succ (c + 1)
     VUM.unsafeModify r succ c
@@ -76,9 +78,9 @@ inducedSort vec valRange sa sl lmsIdx = do
 sais :: VUM.STVector s Int -> Int -> ST s (VUM.STVector s Int)
 sais mvec lim = do
   let !n = VUM.length mvec
-  sa     <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  lmsIdx <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
-  sl0    <- VUM.unsafeNew n :: ST s (VUM.STVector s Bool)
+  sa     <- VUM.replicate n 0    :: ST s (VUM.STVector s Int)
+  lmsIdx <- VUM.replicate n 0    :: ST s (VUM.STVector s Int)
+  sl0    <- VUM.replicate n True :: ST s (VUM.STVector s Bool)
   VUM.unsafeWrite sl0 (n - 1) False
   rangeR (n - 2) 0 $ \i -> do
     mveci  <- VUM.unsafeRead mvec i
@@ -92,8 +94,8 @@ sais mvec lim = do
   vec    <- VU.unsafeFreeze mvec
   inducedSort vec lim sa sl lmsIDX
   let lmsidxSize = VU.length lmsIDX
-  newLMSidx <- VUM.unsafeNew lmsidxSize :: ST s (VUM.STVector s Int)
-  lmsVec    <- VUM.unsafeNew lmsidxSize :: ST s (VUM.STVector s Int)
+  newLMSidx <- VUM.replicate lmsidxSize 0 :: ST s (VUM.STVector s Int)
+  lmsVec    <- VUM.replicate lmsidxSize 0 :: ST s (VUM.STVector s Int)
   kRef <- newSTRef (0 :: Int)
   rep n $ \i -> do
     sai <- VUM.unsafeRead sa i
