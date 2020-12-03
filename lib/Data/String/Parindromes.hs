@@ -107,13 +107,12 @@ parindromes bs = do
             writeSTRef rRef rr
   target1 <- VU.unsafeFreeze p1
   target2 <- VU.unsafeFreeze p2
-  return (target1, target2)
+  return (VU.tail target1, target2)
 
 enumParindromes :: VU.Vector Word8 -> VU.Vector Int
 enumParindromes bs = VU.create $ do
   let !n = VU.length bs
-  (even', _odd) <- parindromes bs
-  let _even = VU.tail even'
+  (_even, _odd) <- parindromes bs
   res <- VUM.unsafeNew (2 * n - 1) :: ST s (VUM.STVector s Int)
   rep (2 * n - 1) $ \i -> do
     if even i
