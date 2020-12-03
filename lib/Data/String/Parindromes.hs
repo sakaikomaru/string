@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Data.String.Manacher where
+module Data.String.Parindromes where
 
 import           Control.Monad
 import           Control.Monad.Cont
