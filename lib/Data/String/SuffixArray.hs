@@ -16,8 +16,6 @@ import qualified Data.Vector.Fusion.Stream.Monadic as VFSM
 import qualified Data.Vector.Unboxed               as VU
 import qualified Data.Vector.Unboxed.Mutable       as VUM
 
-type SuffixArray = VUM.IOVector Int
-
 inducedSort :: VU.Vector Int -> Int -> VUM.STVector s Int -> VU.Vector Bool -> VU.Vector Int -> ST s ()
 inducedSort vec valRange sa sl lmsIdx = do
   l <- VUM.replicate valRange 0 :: ST s (VUM.STVector s Int)
@@ -129,7 +127,7 @@ sais mvec lim = do
       return sa
 
 suffixArray :: VU.Vector Word8 -> VU.Vector Int
-suffixArray s = VU.create $ do
+suffixArray s = VU.tail $ VU.create $ do
   let
     n = VU.length s + 1
   new <- VUM.unsafeNew n :: ST s (VUM.STVector s Int)
@@ -139,12 +137,12 @@ suffixArray s = VU.create $ do
       else VUM.unsafeWrite new i (unsafeCoerce @Word8 @Int $ s VU.! i)
   sais new 128
 
-longestCommonPrefix :: VU.Vector Char -> VU.Vector Int -> IO (VUM.IOVector Int)
+longestCommonPrefix :: VU.Vector Word8 -> VU.Vector Int -> IO (VUM.IOVector Int)
 longestCommonPrefix s sa = do
   let !n = VU.length s
   kPtr <- newIORef (0 :: Int)
-  lcp <- VUM.unsafeNew n  :: IO (VUM.IOVector Int)
-  rank <- VUM.unsafeNew n :: IO (VUM.IOVector Int)
+  lcp <- VUM.replicate n 0  :: IO (VUM.IOVector Int)
+  rank <- VUM.replicate n 0 :: IO (VUM.IOVector Int)
   rep n $ \i -> VUM.unsafeWrite rank (sa VU.! i) i
   rep n $ \i -> do
     modifyIORef kPtr (\l -> bool 0 (l - 1) (l /= 0))
@@ -162,7 +160,6 @@ longestCommonPrefix s sa = do
         VUM.unsafeWrite lcp ranki =<< readIORef kPtr
   VUM.unsafeWrite lcp (n - 1) 0
   return lcp
-
 
 -------------------------------------------------------------------------------
 -- for
